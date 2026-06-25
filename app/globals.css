@@ -140,6 +140,12 @@ button {
 }
 
 .home-jp-title {
+  display: block;
+  font-size: clamp(2.75rem, 11.5vw, 3.32rem);
+  letter-spacing: 0;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  word-break: keep-all;
   -webkit-text-stroke: 0.5px rgba(255, 255, 255, 0.38);
   text-shadow:
     0 2px 0 rgba(255, 255, 255, 0.18),

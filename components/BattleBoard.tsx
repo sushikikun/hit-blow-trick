@@ -256,7 +256,7 @@ function HomeScreen({
 
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-[414px] flex-col justify-start">
         <div className="pt-7">
-          <p className="home-jp-title text-[3.32rem] font-black leading-none tracking-normal text-white drop-shadow-[0_6px_12px_rgba(0,0,0,0.65)]">
+          <p className="home-jp-title whitespace-nowrap break-keep font-black leading-none tracking-normal text-white drop-shadow-[0_6px_12px_rgba(0,0,0,0.65)]">
             ヒット＆ブロー
           </p>
           <h1 className="home-trick-word mt-0.5 text-[6rem] font-black leading-[0.86] tracking-[0.01em] sm:text-[6.15rem]">
