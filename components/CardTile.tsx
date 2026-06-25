@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
-import { COLOR_HEX, COLOR_LABELS } from "@/lib/cards";
+import { COLOR_LABELS } from "@/lib/cards";
+import { colorVar } from "@/lib/color-theme";
 import type { Card } from "@/lib/types";
 
 type CardTileSize = "normal" | "slot" | "mini" | "history" | "historyCompact" | "historyTiny" | "historyMicro";
@@ -32,9 +33,9 @@ export function CardTile({
   onSelect,
 }: CardTileProps) {
   const style: CSSProperties = {
-    backgroundColor: COLOR_HEX[card.backgroundColor],
+    backgroundColor: colorVar(card.backgroundColor),
     backgroundImage: "radial-gradient(circle at 28% 18%, rgba(255,255,255,0.28), transparent 28%), linear-gradient(145deg, rgba(255,255,255,0.3), rgba(255,255,255,0.02) 44%, rgba(0,0,0,0.22))",
-    color: COLOR_HEX[card.textColor],
+    color: colorVar(card.textColor),
   };
   const ariaLabel = `${COLOR_LABELS[card.label]}、文字色${COLOR_LABELS[card.textColor]}、背景色${COLOR_LABELS[card.backgroundColor]}`;
   const classes = [

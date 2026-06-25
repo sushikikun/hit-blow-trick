@@ -4,6 +4,8 @@ export type Theme = "backgroundColor" | "textColor" | "label";
 
 export type Player = "player1" | "player2";
 
+export type GameMode = "solo" | "battle";
+
 export type Card = {
   id: string;
   label: ColorId;

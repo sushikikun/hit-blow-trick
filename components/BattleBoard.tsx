@@ -1,12 +1,26 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CardTile } from "@/components/CardTile";
 import { GuessHistory } from "@/components/GuessHistory";
 import { GuessSlots } from "@/components/GuessSlots";
 import { ResultPanel } from "@/components/ResultPanel";
-import { COLOR_HEX, COLOR_LABELS } from "@/lib/cards";
+import { COLOR_LABELS } from "@/lib/cards";
+import {
+  COLOR_THEME_IDS,
+  COLOR_THEME_STORAGE_KEY,
+  DEFAULT_COLOR_THEME,
+  type ColorTheme,
+  type RgbColor,
+  clampRgbChannel,
+  colorThemeToCssVariables,
+  getReadableTextColor,
+  normalizeColorTheme,
+  rgbToCss,
+  rgbToHex,
+} from "@/lib/color-theme";
 import {
   ANSWER_LENGTH,
   THEME_LABELS,
@@ -18,7 +32,7 @@ import {
   pickDisplayCardForThemeValue,
   validateGuessValues,
 } from "@/lib/game";
-import type { Card, ColorId, GuessRecord, GuessResult, Player, Theme, Winner } from "@/lib/types";
+import type { Card, ColorId, GameMode, GuessRecord, GuessResult, Player, Theme, Winner } from "@/lib/types";
 
 type Phase = "home" | "theme-select" | "turn" | "result";
 
@@ -28,6 +42,7 @@ type DraftItem = {
 };
 
 const THEME_OPTIONS: Theme[] = ["backgroundColor", "textColor", "label"];
+const MODE_OPTIONS: GameMode[] = ["solo", "battle"];
 const COLOR_OPTIONS: ColorId[] = ["red", "blue", "yellow", "green", "purple", "brown"];
 const TITLE_DOT_COLORS: ColorId[] = ["red", "blue", "brown", "yellow", "green", "purple"];
 
@@ -65,6 +80,16 @@ const THEME_COPY: Record<Theme, string> = {
   label: "書かれている色名の並びを当てます",
 };
 
+const MODE_LABELS: Record<GameMode, string> = {
+  solo: "ひとりで遊ぶ",
+  battle: "ふたりで遊ぶ",
+};
+
+const MODE_COPY: Record<GameMode, string> = {
+  solo: "自動生成された4枚の並びを解読します",
+  battle: "同じお題で交互に答える1対1対戦です",
+};
+
 function opponentOf(player: Player): Player {
   return player === "player1" ? "player2" : "player1";
 }
@@ -81,9 +106,9 @@ function getResultText(winner: Winner) {
   return "引き分け。同じラウンドで解読しました";
 }
 
-function ScreenShell({ children }: { children: ReactNode }) {
+function ScreenShell({ children, colorTheme, style }: { children: ReactNode; colorTheme: ColorTheme; style: CSSProperties }) {
   return (
-    <main className="relative isolate min-h-screen overflow-hidden bg-zinc-950 px-2.5 py-2 text-white sm:py-5">
+    <main className="relative isolate min-h-screen overflow-hidden bg-zinc-950 px-2.5 py-2 text-white sm:py-5" style={style}>
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_12%_10%,rgba(220,38,38,0.22),transparent_10rem),radial-gradient(circle_at_86%_12%,rgba(37,99,235,0.2),transparent_11rem),radial-gradient(circle_at_20%_78%,rgba(22,163,74,0.16),transparent_12rem),radial-gradient(circle_at_84%_82%,rgba(147,51,234,0.18),transparent_10rem),#020204]" />
       <div className="pointer-events-none absolute inset-0 -z-10 opacity-30 [background-image:radial-gradient(circle,rgba(255,255,255,0.18)_1px,transparent_1px)] [background-size:17px_17px]" />
       <div className="pointer-events-none absolute inset-0 -z-10">
@@ -92,7 +117,7 @@ function ScreenShell({ children }: { children: ReactNode }) {
             key={`${dot.color}-${index}`}
             className="absolute rounded-full blur-[0.2px]"
             style={{
-              backgroundColor: COLOR_HEX[dot.color],
+              backgroundColor: rgbToCss(colorTheme[dot.color]),
               height: dot.size,
               left: dot.left,
               opacity: dot.opacity,
@@ -111,10 +136,12 @@ function ModalShell({
   children,
   title,
   onClose,
+  showCloseButton = true,
 }: {
   children: ReactNode;
   title: string;
   onClose: () => void;
+  showCloseButton?: boolean;
 }) {
   return (
     <div
@@ -125,42 +152,47 @@ function ModalShell({
       <div className="w-full max-w-sm rounded-lg border border-white/15 bg-zinc-950 p-5 text-white shadow-2xl shadow-black/40">
         <h2 className="text-xl font-black">{title}</h2>
         {children}
-        <button
-          type="button"
-          className="mt-5 w-full rounded-lg bg-red-600 px-4 py-3 text-sm font-black text-white transition hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-300"
-          onClick={onClose}
-        >
-          閉じる
-        </button>
+        {showCloseButton ? (
+          <button
+            type="button"
+            className="mt-5 w-full rounded-lg bg-red-600 px-4 py-3 text-sm font-black text-white transition hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-300"
+            onClick={onClose}
+          >
+            閉じる
+          </button>
+        ) : null}
       </div>
     </div>
   );
 }
 
 function ColorValueButton({
+  colorTheme,
   value,
   disabled = false,
   onSelect,
 }: {
+  colorTheme: ColorTheme;
   value: ColorId;
   disabled?: boolean;
   onSelect: (value: ColorId) => void;
 }) {
-  const darkText = value === "yellow";
+  const buttonColor = colorTheme[value];
+  const textColor = getReadableTextColor(buttonColor);
 
   return (
     <button
       type="button"
       className={[
         "relative min-h-[3.35rem] overflow-hidden rounded-[14px] border border-white/20 px-2 py-2 text-center text-[1.65rem] font-black leading-none shadow-[inset_0_1px_0_rgba(255,255,255,0.34),inset_0_-10px_18px_rgba(0,0,0,0.18),0_8px_14px_rgba(0,0,0,0.34)] transition active:translate-y-[1px] active:shadow-[inset_0_3px_10px_rgba(0,0,0,0.24),0_3px_8px_rgba(0,0,0,0.28)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 disabled:grayscale-[0.15] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
-        darkText ? "text-zinc-950" : "text-white",
       ].join(" ")}
       data-color-value={value}
       disabled={disabled}
       style={{
-        backgroundColor: COLOR_HEX[value],
+        backgroundColor: rgbToCss(buttonColor),
         backgroundImage:
           "radial-gradient(circle at 22% 0%, rgba(255,255,255,0.38), transparent 34%), linear-gradient(180deg, rgba(255,255,255,0.24), rgba(255,255,255,0.04) 44%, rgba(0,0,0,0.26))",
+        color: textColor,
       }}
       onClick={() => onSelect(value)}
     >
@@ -170,7 +202,7 @@ function ColorValueButton({
   );
 }
 
-function TitleDots({ compact = false }: { compact?: boolean }) {
+function TitleDots({ colorTheme, compact = false }: { colorTheme: ColorTheme; compact?: boolean }) {
   return (
     <div className={[compact ? "mt-1 gap-1.5" : "mt-2.5 gap-2.5", "flex justify-center"].join(" ")} aria-hidden="true">
       {TITLE_DOT_COLORS.map((color) => (
@@ -180,7 +212,7 @@ function TitleDots({ compact = false }: { compact?: boolean }) {
             compact ? "size-2" : "size-3",
             "rounded-full shadow-[0_0_11px_rgba(255,255,255,0.3)]",
           ].join(" ")}
-          style={{ backgroundColor: COLOR_HEX[color] }}
+          style={{ backgroundColor: rgbToCss(colorTheme[color]) }}
         />
       ))}
     </div>
@@ -188,9 +220,11 @@ function TitleDots({ compact = false }: { compact?: boolean }) {
 }
 
 function HomeScreen({
+  colorTheme,
   onPlay,
   onSettings,
 }: {
+  colorTheme: ColorTheme;
   onPlay: () => void;
   onSettings: () => void;
 }) {
@@ -228,7 +262,7 @@ function HomeScreen({
           <h1 className="home-trick-word mt-0.5 text-[6rem] font-black leading-[0.86] tracking-[0.01em] sm:text-[6.15rem]">
             TRICK
           </h1>
-          <TitleDots />
+          <TitleDots colorTheme={colorTheme} />
         </div>
 
         <p className="mx-auto mt-6 inline-flex max-w-full flex-nowrap items-center justify-center rounded-full border border-white/22 bg-black/68 px-4 py-3 text-[1.16rem] font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_8px_20px_rgba(0,0,0,0.36)]">
@@ -290,6 +324,121 @@ function HomeScreen({
   );
 }
 
+const RGB_CONTROLS = [
+  { key: "r", label: "R" },
+  { key: "g", label: "G" },
+  { key: "b", label: "B" },
+] satisfies Array<{ key: keyof RgbColor; label: string }>;
+
+function ColorSettingsModal({
+  draftTheme,
+  onChangeColor,
+  onClose,
+  onReset,
+  onSave,
+}: {
+  draftTheme: ColorTheme;
+  onChangeColor: (colorId: ColorId, channel: keyof RgbColor, value: number) => void;
+  onClose: () => void;
+  onReset: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <ModalShell title="色の設定" onClose={onClose} showCloseButton={false}>
+      <div className="mt-3 max-h-[72vh] overflow-y-auto pr-1 text-sm text-zinc-200">
+        <p className="leading-6 text-zinc-300">カードやボタンに使う色味をRGBで調整できます。</p>
+        <div className="mt-4 grid gap-3">
+          {COLOR_THEME_IDS.map((colorId) => {
+            const rgb = draftTheme[colorId];
+            const cssColor = rgbToCss(rgb);
+
+            return (
+              <section
+                key={colorId}
+                className="rounded-lg border border-white/10 bg-white/5 p-3 shadow-inner shadow-black/20"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="grid size-11 shrink-0 place-items-center rounded-lg border border-white/25 text-[0.6rem] font-black shadow-[0_0_16px_currentColor]"
+                      style={{ backgroundColor: cssColor, color: getReadableTextColor(rgb) }}
+                    >
+                      {COLOR_LABELS[colorId]}
+                    </span>
+                    <div>
+                      <h3 className="font-black text-white">{COLOR_LABELS[colorId]}</h3>
+                      <p className="mt-0.5 font-mono text-[0.68rem] font-bold text-zinc-400">
+                        {rgbToHex(rgb).toUpperCase()}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-right font-mono text-[0.66rem] font-bold leading-4 text-zinc-300">
+                    R {rgb.r}<br />G {rgb.g}<br />B {rgb.b}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid gap-2.5">
+                  {RGB_CONTROLS.map((control) => (
+                    <label
+                      key={control.key}
+                      className="grid grid-cols-[1.2rem_minmax(0,1fr)_4.2rem] items-center gap-2 text-xs font-black text-zinc-200"
+                    >
+                      <span>{control.label}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={255}
+                        step={1}
+                        className="h-8 w-full accent-red-500"
+                        value={rgb[control.key]}
+                        onChange={(event) => onChangeColor(colorId, control.key, Number(event.target.value))}
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        max={255}
+                        step={1}
+                        inputMode="numeric"
+                        className="h-9 rounded-md border border-white/15 bg-black/45 px-2 text-right font-mono text-sm font-black text-white outline-none transition focus:border-white/55"
+                        value={rgb[control.key]}
+                        onChange={(event) => onChangeColor(colorId, control.key, Number(event.target.value))}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-2">
+        <button
+          type="button"
+          className="rounded-lg bg-red-600 px-4 py-3 text-sm font-black text-white transition hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-300"
+          onClick={onSave}
+        >
+          保存
+        </button>
+        <button
+          type="button"
+          className="rounded-lg border border-white/15 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          onClick={onReset}
+        >
+          初期値に戻す
+        </button>
+        <button
+          type="button"
+          className="rounded-lg border border-white/15 bg-black/40 px-4 py-3 text-sm font-black text-white transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          onClick={onClose}
+        >
+          閉じる
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
 function ResultCardStrip({ cards }: { cards: Card[] }) {
   return (
     <div className="grid grid-cols-4 gap-1.5">
@@ -323,8 +472,12 @@ function ResultSummary({ result, large = false }: { result: GuessResult; large?:
 
 export function BattleBoard() {
   const [phase, setPhase] = useState<Phase>("home");
+  const [gameMode, setGameMode] = useState<GameMode>("battle");
+  const [selectedMode, setSelectedMode] = useState<GameMode>("battle");
   const [theme, setTheme] = useState<Theme>("label");
   const [selectedTheme, setSelectedTheme] = useState<Theme>("label");
+  const [colorTheme, setColorTheme] = useState<ColorTheme>(DEFAULT_COLOR_THEME);
+  const [draftColorTheme, setDraftColorTheme] = useState<ColorTheme>(DEFAULT_COLOR_THEME);
   const [player1Answer, setPlayer1Answer] = useState<Card[]>([]);
   const [player2Answer, setPlayer2Answer] = useState<Card[]>([]);
   const [currentPlayer, setCurrentPlayer] = useState<Player>("player1");
@@ -337,8 +490,47 @@ export function BattleBoard() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHint, setShowHint] = useState(false);
 
+  useEffect(() => {
+    const storedTheme = window.localStorage.getItem(COLOR_THEME_STORAGE_KEY);
+
+    if (!storedTheme) {
+      return;
+    }
+
+    let active = true;
+    let normalizedTheme = DEFAULT_COLOR_THEME;
+
+    try {
+      normalizedTheme = normalizeColorTheme(JSON.parse(storedTheme));
+    } catch {
+      normalizedTheme = DEFAULT_COLOR_THEME;
+    }
+
+    window.requestAnimationFrame(() => {
+      if (!active) {
+        return;
+      }
+
+      setColorTheme(normalizedTheme);
+      setDraftColorTheme(normalizedTheme);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const colorThemeStyle = useMemo(
+    () => colorThemeToCssVariables(colorTheme) as CSSProperties,
+    [colorTheme],
+  );
   const safeRound = Math.max(1, round);
-  const currentAnswer = currentPlayer === "player1" ? player2Answer : player1Answer;
+  const isSoloMode = gameMode === "solo";
+  const currentAnswer = isSoloMode
+    ? player1Answer
+    : currentPlayer === "player1"
+      ? player2Answer
+      : player1Answer;
   const selectionValues = selection.map((item) => item.value);
   const selectionCards = selection.map((item) => item.displayCard);
   const currentPlayerRecords = useMemo(
@@ -351,7 +543,7 @@ export function BattleBoard() {
   );
   const canGuess = validateGuessValues(selectionValues) && turnResult === null;
   const nextRoundWinner = useMemo(() => {
-    if (!turnResult || currentPlayer !== "player2") {
+    if (isSoloMode || !turnResult || currentPlayer !== "player2") {
       return null;
     }
 
@@ -364,7 +556,7 @@ export function BattleBoard() {
     }
 
     return determineRoundResult(player1RoundRecord.result, turnResult);
-  }, [currentPlayer, records, safeRound, turnResult]);
+  }, [currentPlayer, isSoloMode, records, safeRound, turnResult]);
 
   function resetBattleState() {
     setPlayer1Answer([]);
@@ -391,10 +583,47 @@ export function BattleBoard() {
 
   function handleThemeConfirmed() {
     resetBattleState();
+    setGameMode(selectedMode);
     setTheme(selectedTheme);
-    setPlayer1Answer(generateRandomAnswerCards(selectedTheme));
-    setPlayer2Answer(generateRandomAnswerCards(selectedTheme));
+
+    if (selectedMode === "solo") {
+      setPlayer1Answer(generateRandomAnswerCards(selectedTheme));
+      setPlayer2Answer([]);
+    } else {
+      setPlayer1Answer(generateRandomAnswerCards(selectedTheme));
+      setPlayer2Answer(generateRandomAnswerCards(selectedTheme));
+    }
+
     setPhase("turn");
+  }
+
+  function handleOpenSettings() {
+    setDraftColorTheme(colorTheme);
+    setShowSettings(true);
+  }
+
+  function handleChangeColorTheme(colorId: ColorId, channel: keyof RgbColor, value: number) {
+    setDraftColorTheme((current) => ({
+      ...current,
+      [colorId]: {
+        ...current[colorId],
+        [channel]: clampRgbChannel(value),
+      },
+    }));
+  }
+
+  function handleSaveColorTheme() {
+    const normalizedTheme = normalizeColorTheme(draftColorTheme);
+    setColorTheme(normalizedTheme);
+    setDraftColorTheme(normalizedTheme);
+    window.localStorage.setItem(COLOR_THEME_STORAGE_KEY, JSON.stringify(normalizedTheme));
+    setShowSettings(false);
+  }
+
+  function handleResetColorTheme() {
+    setColorTheme(DEFAULT_COLOR_THEME);
+    setDraftColorTheme(DEFAULT_COLOR_THEME);
+    window.localStorage.removeItem(COLOR_THEME_STORAGE_KEY);
   }
 
   function handleSelectValue(value: ColorId) {
@@ -449,10 +678,21 @@ export function BattleBoard() {
 
     setRecords((current) => [...current, record]);
     setTurnResult(result);
+
+    if (isSoloMode && result.hit === ANSWER_LENGTH) {
+      setWinner("player1");
+      setPhase("result");
+    }
   }
 
   function handleAfterResult() {
     if (!turnResult) {
+      return;
+    }
+
+    if (isSoloMode) {
+      setRound((current) => current + 1);
+      clearTurnDraft();
       return;
     }
 
@@ -481,13 +721,22 @@ export function BattleBoard() {
   }
 
   async function handleCopyResult() {
-    const text = [
-      "ヒット＆ブロー TRICK",
-      `お題: ${THEME_LABELS[theme]}`,
-      `結果: ${getResultText(winner)}`,
-      `Round: ${round}`,
-      typeof window !== "undefined" ? window.location.origin : "",
-    ]
+    const text = (isSoloMode
+      ? [
+          "ヒット＆ブロー TRICK",
+          "ひとりで遊ぶ",
+          `お題: ${THEME_LABELS[theme]}`,
+          `Round ${safeRound}で解読！`,
+          typeof window !== "undefined" ? window.location.origin : "",
+        ]
+      : [
+          "ヒット＆ブロー TRICK",
+          "ふたりで遊ぶ",
+          `お題: ${THEME_LABELS[theme]}`,
+          `結果: ${getResultText(winner)}`,
+          `Round: ${safeRound}`,
+          typeof window !== "undefined" ? window.location.origin : "",
+        ])
       .filter(Boolean)
       .join("\n");
 
@@ -509,10 +758,15 @@ export function BattleBoard() {
     setPhase("home");
   }
 
+  const turnOwnerLabel = isSoloMode ? "あなたの挑戦" : PLAYER_LABELS[currentPlayer];
+  const turnBadgeLabel = isSoloMode ? "ひとりで挑戦" : `${PLAYER_LABELS[currentPlayer]} の回答ターン`;
+
   if (phase === "result") {
     return (
       <ResultPanel
+        colorThemeStyle={colorThemeStyle}
         copied={copied}
+        gameMode={gameMode}
         player1Answer={player1Answer}
         player2Answer={player2Answer}
         records={records}
@@ -527,9 +781,9 @@ export function BattleBoard() {
   }
 
   return (
-    <ScreenShell>
+    <ScreenShell colorTheme={colorTheme} style={colorThemeStyle}>
       {phase === "home" ? (
-        <HomeScreen onPlay={handleStart} onSettings={() => setShowSettings(true)} />
+        <HomeScreen colorTheme={colorTheme} onPlay={handleStart} onSettings={handleOpenSettings} />
       ) : null}
 
       {phase === "theme-select" ? (
@@ -538,7 +792,7 @@ export function BattleBoard() {
           <h1 className="mt-1 text-4xl font-black tracking-normal text-white">
             ヒット＆ブロー TRICK
           </h1>
-          <TitleDots />
+          <TitleDots colorTheme={colorTheme} />
         </section>
       ) : null}
 
@@ -552,10 +806,37 @@ export function BattleBoard() {
             >
               戻る
             </button>
-            <p className="text-xs font-black text-zinc-400">お題選択</p>
+            <p className="text-xs font-black text-zinc-400">モード選択</p>
           </div>
-          <h2 className="mt-4 text-2xl font-black text-white">今回のお題を選んでください</h2>
-          <div className="mt-5 grid gap-3">
+          <h2 className="mt-4 text-2xl font-black text-white">モードとお題を選ぶ</h2>
+
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            {MODE_OPTIONS.map((option) => {
+              const active = selectedMode === option;
+
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  className={[
+                    "min-h-[7rem] rounded-lg border px-3 py-4 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+                    active
+                      ? "border-red-300 bg-red-600/95 text-white shadow-[0_0_22px_rgba(220,38,38,0.32)]"
+                      : "border-white/10 bg-white/10 text-zinc-100 hover:bg-white/15",
+                  ].join(" ")}
+                  onClick={() => setSelectedMode(option)}
+                >
+                  <span className="block text-lg font-black">{MODE_LABELS[option]}</span>
+                  <span className={active ? "mt-2 block text-xs font-bold text-red-50" : "mt-2 block text-xs font-bold text-zinc-400"}>
+                    {MODE_COPY[option]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <h3 className="mt-6 text-sm font-black text-zinc-300">お題</h3>
+          <div className="mt-3 grid gap-3">
             {THEME_OPTIONS.map((option) => {
               const active = selectedTheme === option;
 
@@ -584,7 +865,7 @@ export function BattleBoard() {
             className="mt-5 w-full rounded-lg bg-red-600 px-5 py-4 text-sm font-black text-white transition hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-300"
             onClick={handleThemeConfirmed}
           >
-            このお題で始める
+            この内容で始める
           </button>
         </section>
       ) : null}
@@ -605,7 +886,7 @@ export function BattleBoard() {
                 <h1 className="whitespace-nowrap text-[1.12rem] font-black leading-tight tracking-normal text-white drop-shadow sm:text-[1.25rem]">
                   ヒット＆ブロー <span className="inline-block -skew-x-6">TRICK</span>
                 </h1>
-                <TitleDots compact />
+                <TitleDots colorTheme={colorTheme} compact />
               </div>
               <button
                 type="button"
@@ -618,17 +899,17 @@ export function BattleBoard() {
               </button>
             </div>
 
-            <div className="mt-2 grid grid-cols-[minmax(0,1fr)_7.2rem] gap-2">
+            <div className={["mt-2 grid gap-2", isSoloMode ? "grid-cols-1" : "grid-cols-[minmax(0,1fr)_7.2rem]"].join(" ")}>
               <div>
                 <div className="flex items-center gap-2">
                   <div className="grid size-9 place-items-center rounded-full bg-white text-xl text-zinc-950 shadow-[0_7px_14px_rgba(0,0,0,0.34)]">
-                    {currentPlayer === "player1" ? "1" : "2"}
+                    {isSoloMode ? "挑" : currentPlayer === "player1" ? "1" : "2"}
                   </div>
-                  <p className="text-xs font-black text-white">{PLAYER_LABELS[currentPlayer]}</p>
+                  <p className="text-xs font-black text-white">{turnOwnerLabel}</p>
                 </div>
 
                 <div className="mt-2 rounded-[10px] border border-red-200/25 bg-red-600 px-2 py-1.5 text-center text-xs font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_0_20px_rgba(220,38,38,0.4)] sm:text-sm">
-                  {PLAYER_LABELS[currentPlayer]} の回答ターン
+                  {turnBadgeLabel}
                 </div>
 
                 <p className="mt-2 text-center text-[2.55rem] font-black leading-none text-white drop-shadow">
@@ -642,17 +923,19 @@ export function BattleBoard() {
                 </div>
               </div>
 
-              <aside
-                className="self-start rounded-[12px] border border-white/15 bg-black/60 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_8px_18px_rgba(0,0,0,0.3)]"
-                data-opponent-progress
-              >
-                <h2 className="mb-1.5 text-center text-xs font-black text-white">相手の進行</h2>
-                <GuessHistory
-                  emptyText="まだなし"
-                  records={opponentRecords}
-                  showCards={false}
-                />
-              </aside>
+              {!isSoloMode ? (
+                <aside
+                  className="self-start rounded-[12px] border border-white/15 bg-black/60 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_8px_18px_rgba(0,0,0,0.3)]"
+                  data-opponent-progress
+                >
+                  <h2 className="mb-1.5 text-center text-xs font-black text-white">相手の進行</h2>
+                  <GuessHistory
+                    emptyText="まだなし"
+                    records={opponentRecords}
+                    showCards={false}
+                  />
+                </aside>
+              ) : null}
             </div>
           </section>
 
@@ -703,11 +986,13 @@ export function BattleBoard() {
                   className="mt-4 w-full rounded-lg bg-red-600 px-4 py-4 text-base font-black text-white shadow-lg shadow-red-950/35 transition hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-300"
                   onClick={handleAfterResult}
                 >
-                  {currentPlayer === "player1"
-                    ? "Player 2 のターンへ"
-                    : nextRoundWinner
-                      ? "結果を見る"
-                      : "次のラウンドへ"}
+                  {isSoloMode
+                    ? "次のラウンドへ"
+                    : currentPlayer === "player1"
+                      ? "Player 2 のターンへ"
+                      : nextRoundWinner
+                        ? "結果を見る"
+                        : "次のラウンドへ"}
                 </button>
               </div>
             ) : (
@@ -716,6 +1001,7 @@ export function BattleBoard() {
                   {COLOR_OPTIONS.map((value) => (
                     <ColorValueButton
                       key={value}
+                      colorTheme={colorTheme}
                       disabled={selection.length >= ANSWER_LENGTH}
                       value={value}
                       onSelect={handleSelectValue}
@@ -737,9 +1023,13 @@ export function BattleBoard() {
       ) : null}
 
       {showSettings ? (
-        <ModalShell title="設定" onClose={() => setShowSettings(false)}>
-          <p className="mt-3 text-sm leading-6 text-zinc-300">設定は準備中です。</p>
-        </ModalShell>
+        <ColorSettingsModal
+          draftTheme={draftColorTheme}
+          onChangeColor={handleChangeColorTheme}
+          onClose={() => setShowSettings(false)}
+          onReset={handleResetColorTheme}
+          onSave={handleSaveColorTheme}
+        />
       ) : null}
 
       {showHint ? (
