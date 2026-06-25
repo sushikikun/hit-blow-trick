@@ -664,12 +664,13 @@ export function BattleBoard() {
       return;
     }
 
+    const currentRound = safeRound;
     const answerValues = getAttributeValues(currentAnswer, theme);
     const result = calculateHitBlowByValues(answerValues, selectionValues);
     const markers = calculateGuessMarkersByValues(answerValues, selectionValues);
     const record: GuessRecord = {
       player: currentPlayer,
-      round: safeRound,
+      round: currentRound,
       values: [...selectionValues],
       displayCards: [...selectionCards],
       markers,
@@ -677,12 +678,23 @@ export function BattleBoard() {
     };
 
     setRecords((current) => [...current, record]);
-    setTurnResult(result);
 
-    if (isSoloMode && result.hit === ANSWER_LENGTH) {
-      setWinner("player1");
-      setPhase("result");
+    if (isSoloMode) {
+      if (result.hit === ANSWER_LENGTH) {
+        setTurnResult(result);
+        setWinner("player1");
+        setPhase("result");
+        return;
+      }
+
+      setRound(currentRound + 1);
+      setSelection([]);
+      setTurnResult(null);
+      setCopied(false);
+      return;
     }
+
+    setTurnResult(result);
   }
 
   function handleAfterResult() {
@@ -691,8 +703,6 @@ export function BattleBoard() {
     }
 
     if (isSoloMode) {
-      setRound((current) => current + 1);
-      clearTurnDraft();
       return;
     }
 
